@@ -1,0 +1,112 @@
+openapi: 3.0.3
+info:
+  title: Sentinel Payment Trust API
+  version: 1.0.0
+  description: Assess outgoing vendor payments and release human-approved payments through PayPal Sandbox.
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/assess:
+    post:
+      operationId: assessPendingPayments
+      summary: Assess every pending payment
+      responses:
+        '200':
+          description: Assessments persisted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assessments, mode]
+                properties:
+                  assessments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RiskAssessment'
+                  mode:
+                    type: string
+                    enum: [openai, deterministic-demo]
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+  /api/release:
+    post:
+      operationId: releaseApprovedPayments
+      summary: Release approved payments in one PayPal Payouts batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paymentIds]
+              properties:
+                paymentIds:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    minLength: 1
+      responses:
+        '200':
+          description: Per-payment PayPal release outcomes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  batchId: { type: string, nullable: true }
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReleaseOutcome'
+                  excludedCount: { type: integer, minimum: 0 }
+                  pendingReason: { type: string, nullable: true }
+        '400':
+          description: Invalid selection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Verdict:
+      type: string
+      enum: [RELEASE, HOLD, ESCALATE]
+    RiskAssessment:
+      type: object
+      additionalProperties: false
+      required: [paymentRequestId, riskScore, verdict, confidence, primaryReason, signals, recommendedAction, rationale, deterministicFlags, createdAt]
+      properties:
+        paymentRequestId: { type: string }
+        riskScore: { type: number, minimum: 0, maximum: 100 }
+        verdict: { $ref: '#/components/schemas/Verdict' }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        primaryReason: { type: string }
+        signals: { type: array, items: { type: string } }
+        recommendedAction: { type: string }
+        rationale: { type: string }
+        deterministicFlags: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+    ReleaseOutcome:
+      type: object
+      required: [paymentId, state]
+      properties:
+        paymentId: { type: string }
+        state: { type: string, enum: [SUCCESS, PROCESSING, FAILED, SKIPPED] }
+        batchId: { type: string, nullable: true }
+        paypalRef: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+  responses:
+    UpstreamError:
+      description: Upstream assessment provider failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
